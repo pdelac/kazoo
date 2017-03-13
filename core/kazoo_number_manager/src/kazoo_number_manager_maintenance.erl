@@ -26,6 +26,7 @@
         ,fix_accounts_numbers/1
         ]).
 -export([migrate/0, migrate/1
+        ,parallel_migrate/1, parallel_migrate/2
         ,migrate_unassigned_numbers/0, migrate_unassigned_numbers/1
         ]).
 -export([generate_numbers/4]).
@@ -37,12 +38,12 @@
        ,kapps_config:get_integer(?KNM_CONFIG_CAT, <<"time_between_accounts_ms">>, ?MILLISECONDS_IN_SECOND)).
 
 -define(TIME_BETWEEN_NUMBERS_MS
-       ,kapps_config:get_integer(?KNM_CONFIG_CAT, <<"time_between_numbers_ms">>, ?MILLISECONDS_IN_SECOND)).
+       ,kapps_config:get_integer(?KNM_CONFIG_CAT, <<"time_between_numbers_ms">>, 10)).
 
 -define(LOG(Format, Args)
        ,begin
             lager:debug(Format, Args),
-            io:format(Format ++ "\n", Args)
+            io:format("~p " Format ++ "\n", [self()|Args])
         end
        ).
 
@@ -147,6 +148,7 @@ refresh_numbers_dbs([NumberDb|NumberDbs], Total) ->
     refresh_numbers_dbs(NumberDbs, Total).
 
 -spec refresh_numbers_db(ne_binary()) -> 'ok'.
+refresh_numbers_db(<<"numbers%2F%2Bnumbers/managed">>) -> 'ok';
 refresh_numbers_db(<<?KNM_DB_PREFIX_ENCODED, _/binary>> = NumberDb) ->
     {'ok',_} = kz_datamgr:revise_doc_from_file(NumberDb
                                               ,'kazoo_number_manager'
@@ -170,7 +172,7 @@ fix_accounts_numbers(Accounts) ->
 
 fix_account_numbers(AccountDb = ?MATCH_ACCOUNT_ENCODED(A,B,Rest)) ->
     kz_util:put_callid(?MODULE),
-    ?LOG("########## fixing [~s] ##########", [AccountDb]),
+    ?LOG("########## fixing ~s ##########", [AccountDb]),
     ?LOG("[~s] getting numbers from account db", [AccountDb]),
     DisplayPNs = get_DIDs(AccountDb, <<"phone_numbers/crossbar_listing">>),
     put(callflow_DIDs, get_DIDs_callflow(AccountDb)),
@@ -196,17 +198,17 @@ fix_account_numbers(AccountDb = ?MATCH_ACCOUNT_ENCODED(A,B,Rest)) ->
     _ = knm_phone_number:push_stored(), %% Bulk doc writes
     ToRm0 = gb_sets:to_list(Leftovers),
     lists:foreach(fun (DID) ->
-                          ?LOG("########## found alien [~s] doc: ~s ##########", [AccountDb, DID])
+                          ?LOG("########## found alien ~s doc: ~s ##########", [AccountDb, DID])
                   end
                  ,ToRm0
                  ),
     ToRm = [DID
             || DID <- ToRm0,
                false =:= is_assigned_to(AccountDb, DID, AccountId),
-               ok =:= ?LOG("########## will remove [~s] doc: ~s ##########", [AccountDb, DID])
+               ok =:= ?LOG("########## will remove ~s doc: ~s ##########", [AccountDb, DID])
            ],
     _ = kz_datamgr:del_docs(AccountDb, ToRm),
-    ?LOG("########## done fixing [~s] ##########", [AccountDb]);
+    ?LOG("########## done fixing ~s ##########", [AccountDb]);
 fix_account_numbers(Account = ?NE_BINARY) ->
     fix_account_numbers(kz_util:format_account_db(Account)).
 
@@ -240,6 +242,61 @@ migrate(Account) ->
     fix_account_numbers(AccountDb),
     _ = kz_datamgr:del_doc(AccountDb, <<"phone_numbers">>),
     'ok'.
+
+-spec parallel_migrate(integer()) -> 'ok'.
+parallel_migrate(Workers) ->
+    parallel_migrate(Workers, ?TIME_BETWEEN_ACCOUNTS_MS).
+
+-spec parallel_migrate(integer(), integer()) -> 'ok'.
+parallel_migrate(Workers, Pause) when is_binary(Workers) ->
+    parallel_migrate(kz_util:to_integer(Workers), Pause);
+parallel_migrate(Workers, Pause) when is_binary(Pause) ->
+    parallel_migrate(Workers, kz_util:to_integer(Pause));
+parallel_migrate(Workers, Pause) ->
+%%    _ = refresh_numbers_dbs(),
+    AccountDbs = kapps_util:get_all_accounts(),
+    AccountSplit = kz_util:to_integer(length(AccountDbs) / Workers),
+    SplitDbs = split(AccountSplit, AccountDbs, []),
+    parallel_migrate(Pause, SplitDbs, []).
+
+-type split_results() :: [{ne_binaries()}].
+-spec split(integer(), ne_binaries(), ne_binaries()) -> split_results().
+split(_, [], Results) -> Results;
+split(AccountSplit, Accounts, Results) ->
+    {AccountDbs, RemainingAccounts} = split(AccountSplit, Accounts),
+    split(AccountSplit, RemainingAccounts, [{AccountDbs}|Results]).
+
+-spec split(integer(), [any()]) -> {[any()],[any()]}.
+split(Count, List) ->
+    case length(List) >= Count of
+        'false' -> {List, []};
+        'true' -> lists:split(Count, List)
+    end.
+
+-spec parallel_migrate(integer(), split_results(), references()) -> 'ok'.
+parallel_migrate(_, [], Refs) -> wait_for_parallel_migrate(Refs);
+parallel_migrate(Pause, [{AccountDbs}|Remaining], Refs) ->
+    Self = self(),
+    Ref = make_ref(),
+    _Pid = kz_util:spawn_link(fun parallel_migrate_worker/4, [Ref, Pause, AccountDbs, Self]),
+    parallel_migrate(Pause, Remaining, [Ref|Refs]).
+
+-spec parallel_migrate_worker(integer(), reference(), ne_binaries(), pid()) -> reference().
+parallel_migrate_worker(Ref, Pause, AccountDbs, Parent) ->
+    _R = (catch foreach_pause_in_between(Pause, fun migrate/1, AccountDbs)),
+    io:format("~p~n", [_R]),
+    Parent ! Ref.
+
+-spec wait_for_parallel_migrate(references()) -> 'ok'.
+wait_for_parallel_migrate([]) ->
+    erase(callflow_DIDs),
+    erase(trunkstore_DIDs),
+    _ = migrate_unassigned_numbers(),
+    'ok';
+wait_for_parallel_migrate([Ref|Refs]) ->
+    receive
+        Ref -> wait_for_parallel_migrate(Refs)
+    end.
 
 -spec migrate_unassigned_numbers() -> 'ok'.
 -spec migrate_unassigned_numbers(ne_binary(), integer()) -> 'ok'.
