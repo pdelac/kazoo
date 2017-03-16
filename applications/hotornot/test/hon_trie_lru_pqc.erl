@@ -1,3 +1,4 @@
+%% invoke with `proper:quickcheck(hon_trie_lru_pqc:correct())` or `correct_parallel`
 -module(hon_trie_lru_pqc).
 
 -ifdef(PROPER).
