@@ -19,7 +19,7 @@
         ,put/2
         ,post/2, post/3
         ,patch/2, patch/3
-        ,delete/2, delete/3, default/1
+        ,delete/2, delete/3
         ]).
 
 -include("crossbar.hrl").
