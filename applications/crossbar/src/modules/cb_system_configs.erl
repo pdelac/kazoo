@@ -168,10 +168,11 @@ validate_system_config(Context, Id, ?HTTP_DELETE, _Node) ->
 
 -spec read_document(ne_binary(), boolean()) -> cb_context:context().
 read_document(Id, _WithDefaults = true) ->
-    JObj = apply_default_node_to_nodes(get_system_config(Id)),
-    set_id(Id, JObj);
+    JObj = apply_default_node_to_nodes(maybe_new(kapps_config:get_category(Id))),
+    Default = make_default(Id, maybe_add_default(kz_json:get_keys(strip_id(kz_json:public_fields(JObj))))),
+    set_id(Id, kz_json:merge_recursive(Default, JObj));
 read_document(Id, _WithDefaults = false) ->
-    Config = add_default_node(Id, apply_default_node_to_nodes(maybe_new(kapps_config:get_category(Id)))),
+    Config = add_default_node(Id, maybe_new(kapps_config:get_category(Id))),
     set_id(Id, Config).
 
 -spec update_node_value(ne_binary(), kz_json:object(), kz_json:object()) -> kz_json:object().
@@ -192,12 +193,13 @@ add_default_node(Id, Config) ->
 
 -spec read_document_node(ne_binary(), ne_binary(), boolean()) -> cb_context:context().
 read_document_node(Id, Node, _WithDefaults = true) ->
-    JObj = get_system_config(Id, Node),
-    set_id(Id, Node, JObj);
+    Config = maybe_new(kapps_config:get_category(Id)),
+    DefaultNode = kz_json:get_value(?DEFAULT, Config, kz_json:new()),
+    NodeValue = kz_json:get_value(Node, Config, kz_json:new()),
+    set_id(Id, Node, kz_json:merge_recursive(default(Id), kz_json:merge_recursive(DefaultNode, NodeValue)));
 read_document_node(Id, Node, _WithDefaults = false) ->
     Config = maybe_new(kapps_config:get_category(Id)),
-    Default = kz_json:get_value(?DEFAULT, Config, kz_json:new()),
-    NodeValue = kz_json:merge_recursive(Default, kz_json:get_value(Node, Config, kz_json:new())),
+    NodeValue = kz_json:get_value(Node, Config, kz_json:new()),
     set_id(Id, Node, NodeValue).
 
 %%--------------------------------------------------------------------
