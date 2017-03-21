@@ -174,15 +174,18 @@ read_document(Id, _WithDefaults = false) ->
     Config = add_default_node(Id, apply_default_node_to_nodes(maybe_new(kapps_config:get_category(Id)))),
     set_id(Id, Config).
 
+-spec update_node_value(ne_binary(), kz_json:object(), kz_json:object()) -> kz_json:object().
 update_node_value(Node, Value, Config) ->
     NodeValue = kz_json:get_value(Node, Config, kz_json:new()),
     kz_json:set_value(Node, kz_json:merge_recursive(Value, NodeValue), Config).
 
+-spec apply_default_node_to_nodes(kz_json:object()) -> kz_json:object().
 apply_default_node_to_nodes(Config) ->
     DefaultNode = kz_json:get_value(?DEFAULT, Config, kz_json:new()),
     Keys = kz_json:get_keys(kz_json:public_fields(Config)) -- [?DEFAULT],
     lists:foldl(fun(Key, Acc) -> update_node_value(Key, DefaultNode, Acc) end, Config, Keys).
 
+-spec add_default_node(ne_binary(), kz_json:object()) -> kz_json:object().
 add_default_node(Id, Config) ->
     DefaultNode = kz_json:get_value(?DEFAULT, Config, kz_json:new()),
     kz_json:set_value(?DEFAULT, kz_json:merge_recursive(default(Id), DefaultNode), Config).
@@ -313,6 +316,7 @@ set_id(ConfigId, JObj) -> kz_json:set_value(<<"id">>, ConfigId, JObj).
 set_id(ConfigId, Node, JObj) ->
     kz_doc:set_id(JObj, <<ConfigId/binary, "/", Node/binary>>).
 
+-spec maybe_set_id(ne_binary(), kz_json:object()) -> kz_json:object().
 maybe_set_id(ConfigId, JObj) ->
     case kapps_config:get_category(ConfigId) of
         {ok, Doc} -> kz_json:merge_recursive(Doc, JObj);
