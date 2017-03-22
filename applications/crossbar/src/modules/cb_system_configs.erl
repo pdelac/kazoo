@@ -42,7 +42,7 @@ init() ->
     _ = kz_datamgr:db_create(?KZ_CONFIG_DB),
     _ = kz_datamgr:revise_doc_from_file(?KZ_CONFIG_DB, 'crossbar', <<"views/system_configs.json">>),
 
-    _ = crossbar_bindings:bind(<<"*.authorize">>, ?MODULE, 'authorize'),
+    _ = crossbar_bindings:bind(<<"*.authorize.system_configs">>, ?MODULE, 'authorize'),
     _ = crossbar_bindings:bind(<<"*.allowed_methods.system_configs">>, ?MODULE, 'allowed_methods'),
     _ = crossbar_bindings:bind(<<"*.resource_exists.system_configs">>, ?MODULE, 'resource_exists'),
     _ = crossbar_bindings:bind(<<"*.validate.system_configs">>, ?MODULE, 'validate'),
@@ -58,20 +58,20 @@ init() ->
 %% allowed to access the resource, or false if not.
 %% @end
 %%--------------------------------------------------------------------
--spec authorize(cb_context:context()) -> boolean().
--spec authorize(cb_context:context(), path_token()) -> boolean().
--spec authorize(cb_context:context(), path_token(), path_token()) -> boolean().
+-type authorize_return() :: boolean() | {'halt', cb_context:context()}.
+
+-spec authorize(cb_context:context()) -> authorize_return().
+-spec authorize(cb_context:context(), path_token()) -> authorize_return().
+-spec authorize(cb_context:context(), path_token(), path_token()) -> authorize_return().
 authorize(Context) ->
-    cb_context:is_superduper_admin(Context)
-        andalso
-        is_system_request(Context).
+    case cb_context:is_superduper_admin(Context)
+        andalso cb_context:req_nouns(Context) of
+        'false' -> {'halt', cb_context:add_system_error('forbidden', Context)};
+        [{<<"system_configs">>, _}] -> 'true';
+        _ -> {'halt', cb_context:add_system_error('bad_identifier', Context)}
+    end.
 authorize(Context, _Id) -> authorize(Context).
 authorize(Context, _Id, _Node) -> authorize(Context).
-
--spec is_system_request(cb_context:context()) -> boolean().
-is_system_request(Context) ->
-    [{Mod, _}|_] = cb_context:req_nouns(Context),
-    Mod =:= <<"system_configs">>.
 
 %%--------------------------------------------------------------------
 %% @public
