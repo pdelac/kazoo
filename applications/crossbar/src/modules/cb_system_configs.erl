@@ -183,12 +183,8 @@ update_node_value(Node, Value, Config) ->
 -spec apply_default_node_to_nodes(kz_json:object()) -> kz_json:object().
 apply_default_node_to_nodes(Config) ->
     DefaultNode = kz_json:get_value(?DEFAULT, Config, kz_json:new()),
-    Keys = kz_json:get_keys(filter_objects(Config)) -- [?DEFAULT],
+    Keys = kz_json:get_keys(kz_json:public_fields(Config)) -- [?DEFAULT],
     lists:foldl(fun(Key, Acc) -> update_node_value(Key, DefaultNode, Acc) end, Config, Keys).
-
--spec filter_objects(kz_json:object()) -> kz_json:object().
-filter_objects(Config) ->
-    kz_json:filter(fun({_K, V}) -> kz_json:is_json_object(V) end, kz_json:public_fields(Config)).
 
 -spec add_default_node(ne_binary(), kz_json:object()) -> kz_json:object().
 add_default_node(Id, Config) ->
