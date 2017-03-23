@@ -137,13 +137,13 @@ validate_verb(Context, Id, ?HTTP_PUT) ->
     validate_verb(Context, Id, ?HTTP_POST);
 
 validate_verb(Context, Id, ?HTTP_POST) ->
-    RequestData = kz_doc:public_fields(cb_context:req_data(Context)),
-    Doc = maybe_new(kapps_config:get_category(Id)),
+    RequestData = strip_id(kz_doc:public_fields(cb_context:req_data(Context))),
+    Doc = apply_default_node_to_nodes(maybe_new(kapps_config:get_category(Id))),
     Default = make_default(Id, kz_json:get_keys(RequestData)),
-    validate_request(Context, Id, kapps_config_util:system_config_document_schema(Id), kz_json:merge_recursive(Doc, Default));
+    validate_request(Context, Id, kapps_config_util:system_config_document_schema(Id), kz_json:merge_recursive(Default, Doc));
 
 validate_verb(Context, Id, ?HTTP_PATCH) ->
-    Doc = maybe_new(kapps_config:get_category(Id)),
+    Doc = apply_default_node_to_nodes(maybe_new(kapps_config:get_category(Id))),
     validate_request(Context, Id, kapps_config_util:system_config_document_schema(Id), kz_json:merge_recursive(Doc, get_system_config(Id)));
 
 validate_verb(Context, Id, ?HTTP_DELETE) ->
@@ -158,10 +158,13 @@ validate_system_config(Context, Id, ?HTTP_PUT, Node) ->
     validate_with_parent(Context, Id, Node, default_with_id(Id));
 
 validate_system_config(Context, Id, ?HTTP_POST, Node) ->
-    validate_with_parent(Context, Id, Node, default_with_id(Id));
+    Doc = read_document(Id, true),
+    validate_with_parent(Context, Id, Node, kz_json:get_value(?DEFAULT, Doc));
 
 validate_system_config(Context, Id, ?HTTP_PATCH, Node) ->
-    validate_with_parent(Context, Id, Node, get_system_config(Id, Node));
+    RequestData = strip_id(kz_doc:public_fields(cb_context:req_data(Context))),
+    Ctx1 = cb_context:set_req_data(Context, kz_json:merge(RequestData, read_document_node(Id, Node, false))),
+    validate_with_parent(Ctx1, Id, Node, default(Id));
 
 validate_system_config(Context, Id, ?HTTP_DELETE, _Node) ->
     read_for_delete(Id, Context).
@@ -353,20 +356,13 @@ validate_request(Context, Id, Schema, Parent) ->
 maybe_new({ok, JObj}) -> JObj;
 maybe_new(_) -> kz_json:new().
 
--spec default_with_id(cb_context:context()) -> kz_json:object().
-default_with_id(Config) ->
-    kz_doc:set_id(default(Config), Config).
+-spec default_with_id(ne_binary()) -> kz_json:object().
+default_with_id(Id) ->
+    kz_doc:set_id(default(Id), Id).
 
--spec default(cb_context:context()) -> kz_json:object().
-default(Config) ->
-    kz_json_schema:default_object(kapps_config_util:system_schema(Config)).
-
--spec get_system_config(ne_binary(), ne_binary()) -> kz_json:object().
-get_system_config(Config, Node) ->
-    Default = default_with_id(Config),
-    System = maybe_new(kapps_config:get_category(Config)),
-    SystemNode = kz_json:get_value(Node, System, kz_json:new()),
-    kz_json:merge_recursive(Default, SystemNode).
+-spec default(ne_binary()) -> kz_json:object().
+default(Id) ->
+    kz_json_schema:default_object(kapps_config_util:system_schema(Id)).
 
 -spec get_system_config(ne_binary()) -> kz_json:object().
 get_system_config(Config) ->
