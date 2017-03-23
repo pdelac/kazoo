@@ -1303,7 +1303,7 @@ maybe_new(_) -> kz_json:new().
 get_config_document(Id) ->
     kz_doc:public_fields(maybe_new(kapps_config:get_category(Id))).
 
--spec validate_system_config(ne_binary()) -> ok.
+-spec validate_system_config(ne_binary()) -> [{_, _}].
 validate_system_config(Id) ->
     Doc = get_config_document(Id),
     Keys = kz_json:get_keys(Doc),
