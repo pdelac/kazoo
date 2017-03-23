@@ -138,13 +138,15 @@ validate_verb(Context, Id, ?HTTP_PUT) ->
 
 validate_verb(Context, Id, ?HTTP_POST) ->
     RequestData = strip_id(kz_doc:public_fields(cb_context:req_data(Context))),
-    Doc = apply_default_node_to_nodes(maybe_new(kapps_config:get_category(Id))),
-    Default = make_default(Id, kz_json:get_keys(RequestData)),
-    validate_request(Context, Id, kapps_config_util:system_config_document_schema(Id), kz_json:merge_recursive(Default, Doc));
+    Default = make_default_with_default(Id, kz_json:get_keys(RequestData)),
+    validate_request(Context, Id, kapps_config_util:system_config_document_schema(Id), Default);
 
 validate_verb(Context, Id, ?HTTP_PATCH) ->
+    RequestData = strip_id(kz_doc:public_fields(cb_context:req_data(Context))),
     Doc = apply_default_node_to_nodes(maybe_new(kapps_config:get_category(Id))),
-    validate_request(Context, Id, kapps_config_util:system_config_document_schema(Id), kz_json:merge_recursive(Doc, get_system_config(Id)));
+    FullDoc = kz_json:merge(RequestData, Doc),
+    Ctx1 = cb_context:set_req_data(Context, FullDoc),
+    validate_request(Ctx1, Id, kapps_config_util:system_config_document_schema(Id), make_default(Id, kz_json:get_keys(FullDoc)));
 
 validate_verb(Context, Id, ?HTTP_DELETE) ->
     read_for_delete(Id, Context).
@@ -324,7 +326,7 @@ set_id(ConfigId, Node, JObj) ->
 -spec maybe_set_id(ne_binary(), kz_json:object()) -> kz_json:object().
 maybe_set_id(ConfigId, JObj) ->
     case kapps_config:get_category(ConfigId) of
-        {ok, Doc} -> kz_json:merge_recursive(Doc, JObj);
+        {ok, Doc} -> kz_json:merge_recursive(JObj, kz_doc:private_fields(Doc));
         _ -> kz_doc:set_id(JObj, ConfigId)
     end.
 
@@ -364,15 +366,15 @@ default_with_id(Id) ->
 default(Id) ->
     kz_json_schema:default_object(kapps_config_util:system_schema(Id)).
 
--spec get_system_config(ne_binary()) -> kz_json:object().
-get_system_config(Config) ->
-    System = maybe_new(kapps_config:get_category(Config)),
-    Default = make_default(Config, maybe_add_default(kz_json:get_keys(kz_doc:public_fields(System)))),
-    kz_json:merge_recursive(Default, System).
-
 -spec make_default(ne_binary(), [ne_binary()]) -> kz_json:object().
 make_default(Id, Keys) ->
-    lists:foldl(fun(K, Json) -> kz_json:set_value(K, default(Id), Json) end, kz_json:new(), Keys).
+    Default = default(Id),
+    lists:foldl(fun(K, Json) -> kz_json:set_value(K, Default, Json) end, kz_json:new(), Keys).
+
+-spec make_default_with_default(ne_binary(), [ne_binary()]) -> kz_json:object().
+make_default_with_default(Id, Keys) ->
+    Default = read_document_node(Id, ?DEFAULT, true),
+    lists:foldl(fun(K, Json) -> kz_json:set_value(K, Default, Json) end, kz_json:new(), Keys -- [?DEFAULT]).
 
 -spec maybe_add_default([ne_binary()]) -> [ne_binary()].
 maybe_add_default(Keys) ->
