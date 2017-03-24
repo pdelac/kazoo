@@ -1419,60 +1419,65 @@ generate_ccvs(Endpoint, Call, CallFwd) ->
               ,fun maybe_auto_answer/1
               ],
     Acc0 = {Endpoint, Call, CallFwd, kz_json:new()},
-    {_Endpoint, _Call, _CallFwd, JObj} = lists:foldr(fun(F, Acc) -> F(Acc) end, Acc0, CCVFuns),
-    JObj.
+    {_Endpoint, _Call, _CallFwd, CCVs} = lists:foldr(fun(F, Acc) -> F(Acc) end, Acc0, CCVFuns),
+    CCVs.
 
 -type ccv_acc() :: {kz_json:object(), kapps_call:call(), api_object(), kz_json:object()}.
 
 -spec maybe_retain_caller_id(ccv_acc()) -> ccv_acc().
 maybe_retain_caller_id({_Endpoint, _Call, 'undefined', _JObj}=Acc) ->
     Acc;
-maybe_retain_caller_id({Endpoint, Call, CallFwd, JObj}) ->
+maybe_retain_caller_id({Endpoint, Call, CallFwd, CCVs}) ->
     {Endpoint, Call, CallFwd
     ,case kz_json:is_true(<<"keep_caller_id">>, CallFwd) of
          'true' ->
              lager:info("call forwarding will retain caller id"),
-             kz_json:set_value(<<"Retain-CID">>, <<"true">>, JObj);
-         'false' -> JObj
+             kz_json:set_value(<<"Retain-CID">>, <<"true">>, CCVs);
+         'false' -> CCVs
      end
     }.
 
 -spec maybe_set_endpoint_id(ccv_acc()) -> ccv_acc().
-maybe_set_endpoint_id({Endpoint, Call, CallFwd, JObj}) ->
-    JObj1 = case kz_doc:id(Endpoint) of
-                'undefined' -> JObj;
-                EndpointId ->
-                    kz_json:set_values([{<<"Authorizing-ID">>, EndpointId}
-                                       ,{<<"Authorizing-Type">>, kz_json:get_value(<<"pvt_type">>, Endpoint)}
-                                       ], JObj)
-            end,
-    {Endpoint, Call, CallFwd, JObj1}.
+maybe_set_endpoint_id({Endpoint, Call, CallFwd, CCVs}) ->
+    {Endpoint, Call, CallFwd
+    ,case kz_doc:id(Endpoint) of
+         'undefined' -> CCVs;
+         EndpointId ->
+             kz_json:set_values([{<<"Authorizing-ID">>, EndpointId}
+                                ,{<<"Authorizing-Type">>, kz_doc:type(Endpoint)}
+                                ]
+                               ,CCVs
+                               )
+     end
+    }.
 
 -spec maybe_set_owner_id(ccv_acc()) -> ccv_acc().
-maybe_set_owner_id({Endpoint, Call, CallFwd, JObj}) ->
+maybe_set_owner_id({Endpoint, Call, CallFwd, CCVs}) ->
     {Endpoint, Call, CallFwd
     ,case kz_json:get_value(<<"owner_id">>, Endpoint) of
-         'undefined' -> JObj;
-         OwnerId -> kz_json:set_value(<<"Owner-ID">>, OwnerId, JObj)
+         'undefined' -> CCVs;
+         OwnerId -> kz_json:set_value(<<"Owner-ID">>, OwnerId, CCVs)
      end
     }.
 
 -spec maybe_set_account_id(ccv_acc()) -> ccv_acc().
-maybe_set_account_id({Endpoint, Call, CallFwd, JObj}) ->
+maybe_set_account_id({Endpoint, Call, CallFwd, CCVs}) ->
     AccountId = kz_doc:account_id(Endpoint, kapps_call:account_id(Call)),
     {Endpoint, Call, CallFwd
-    ,kz_json:set_value(<<"Account-ID">>, AccountId, JObj)
+    ,kz_json:set_value(<<"Account-ID">>, AccountId, CCVs)
     }.
 
 -spec maybe_set_call_forward(ccv_acc()) -> ccv_acc().
-maybe_set_call_forward({_Endpoint, _Call, 'undefined', _JObj}=Acc) ->
+maybe_set_call_forward({_Endpoint, _Call, 'undefined', _CCVs}=Acc) ->
     Acc;
-maybe_set_call_forward({Endpoint, Call, CallFwd, JObj}) ->
+maybe_set_call_forward({Endpoint, Call, CallFwd, CCVs}) ->
     {Endpoint, Call, CallFwd
     ,kz_json:set_values([{<<"Call-Forward">>, <<"true">>}
                         ,{<<"Authorizing-Type">>, <<"device">>}
-                         | bowout_settings(kapps_call:call_id_direct(Call) =:= 'undefined')
-                        ], JObj)
+                         | bowout_settings('undefined' =:= kapps_call:call_id_direct(Call))
+                        ]
+                       ,CCVs
+                       )
     }.
 
 -spec bowout_settings(boolean()) -> kz_proplist().
@@ -1486,15 +1491,15 @@ bowout_settings('false') ->
     ].
 
 -spec maybe_auto_answer(ccv_acc()) -> ccv_acc().
-maybe_auto_answer({Endpoint, Call, CallFwd, JObj}=Acc) ->
+maybe_auto_answer({Endpoint, Call, CallFwd, CCVs}=Acc) ->
     case kapps_call:custom_channel_var(<<"Auto-Answer-Loopback">>, Call) of
         'undefined' -> Acc;
         AutoAnswer ->
-            {Endpoint, Call, CallFwd, kz_json:set_value(<<"Auto-Answer">>, AutoAnswer, JObj)}
+            {Endpoint, Call, CallFwd, kz_json:set_value(<<"Auto-Answer">>, AutoAnswer, CCVs)}
     end.
 
 -spec maybe_set_confirm_properties(ccv_acc()) -> ccv_acc().
-maybe_set_confirm_properties({Endpoint, Call, CallFwd, JObj}=Acc) ->
+maybe_set_confirm_properties({Endpoint, Call, CallFwd, CCVs}=Acc) ->
     case kz_json:is_true(<<"require_keypress">>, CallFwd) of
         'false' -> Acc;
         'true' ->
@@ -1505,43 +1510,43 @@ maybe_set_confirm_properties({Endpoint, Call, CallFwd, JObj}=Acc) ->
                       ,{<<"Require-Ignore-Early-Media">>, <<"true">>}
                       ],
             {Endpoint, Call, CallFwd
-            ,kz_json:merge_jobjs(kz_json:from_list(Confirm), JObj)
+            ,kz_json:merge_jobjs(kz_json:from_list(Confirm), CCVs)
             }
     end.
 
 -spec maybe_enable_fax(ccv_acc()) -> ccv_acc().
-maybe_enable_fax({Endpoint, Call, CallFwd, JObj}=Acc) ->
+maybe_enable_fax({Endpoint, Call, CallFwd, CCVs}=Acc) ->
     case kz_json:get_value([<<"media">>, <<"fax_option">>], Endpoint) of
         <<"auto">> ->
             {Endpoint, Call, CallFwd
-            ,kz_json:set_value(<<"Fax-Enabled">>, <<"true">>, JObj)
+            ,kz_json:set_value(<<"Fax-Enabled">>, <<"true">>, CCVs)
             };
         _Else -> Acc
     end.
 
 -spec maybe_enforce_security(ccv_acc()) -> ccv_acc().
-maybe_enforce_security({Endpoint, Call, CallFwd, JObj}) ->
+maybe_enforce_security({Endpoint, Call, CallFwd, CCVs}) ->
     EnforceSecurity = kz_json:is_true([<<"media">>, <<"encryption">>, <<"enforce_security">>], Endpoint, 'true'),
     {Endpoint, Call, CallFwd
-    ,kz_json:set_value(<<"Media-Encryption-Enforce-Security">>, EnforceSecurity, JObj)
+    ,kz_json:set_value(<<"Media-Encryption-Enforce-Security">>, EnforceSecurity, CCVs)
     }.
 
 -spec maybe_set_encryption_flags(ccv_acc()) -> ccv_acc().
-maybe_set_encryption_flags({Endpoint, Call, CallFwd, JObj}) ->
+maybe_set_encryption_flags({Endpoint, Call, CallFwd, CCVs}) ->
     {Endpoint, Call, CallFwd
-    ,encryption_method_map(JObj, Endpoint)
+    ,encryption_method_map(CCVs, Endpoint)
     }.
 
 -spec encryption_method_map(api_object(), api_binaries() | kz_json:object()) -> api_object().
-encryption_method_map(JObj, []) -> JObj;
-encryption_method_map(JObj, [Method|Methods]) ->
+encryption_method_map(CCVs, []) -> CCVs;
+encryption_method_map(CCVs, [Method|Methods]) ->
     case props:get_value(Method, ?ENCRYPTION_MAP, []) of
-        [] -> encryption_method_map(JObj, Methods);
+        [] -> encryption_method_map(CCVs, Methods);
         Values ->
-            encryption_method_map(kz_json:set_values(Values, JObj), Method)
+            encryption_method_map(kz_json:set_values(Values, CCVs), Method)
     end;
-encryption_method_map(JObj, Endpoint) ->
-    encryption_method_map(JObj
+encryption_method_map(CCVs, Endpoint) ->
+    encryption_method_map(CCVs
                          ,kz_json:get_value([<<"media">>
                                             ,<<"encryption">>
                                             ,<<"methods">>
@@ -1553,18 +1558,19 @@ encryption_method_map(JObj, Endpoint) ->
 
 
 -spec set_sip_invite_domain(ccv_acc()) -> ccv_acc().
-set_sip_invite_domain({Endpoint, Call, CallFwd, JObj}) ->
+set_sip_invite_domain({Endpoint, Call, CallFwd, CCVs}) ->
     {Endpoint, Call, CallFwd
-    ,kz_json:set_value(<<"SIP-Invite-Domain">>, kapps_call:request_realm(Call), JObj)
+    ,kz_json:set_value(<<"SIP-Invite-Domain">>, kapps_call:request_realm(Call), CCVs)
     }.
 
 -spec maybe_set_call_waiting(ccv_acc()) -> ccv_acc().
-maybe_set_call_waiting({Endpoint, Call, CallFwd, JObj}) ->
-    NewJobj = case kz_json:is_true([<<"call_waiting">>, <<"enabled">>], Endpoint, 'true') of
-                  'true' -> JObj;
-                  'false' -> kz_json:set_value(<<"Call-Waiting-Disabled">>, 'true', JObj)
-              end,
-    {Endpoint, Call, CallFwd, NewJobj}.
+maybe_set_call_waiting({Endpoint, Call, CallFwd, CCVs}) ->
+    {Endpoint, Call, CallFwd
+    ,case kz_json:is_true([<<"call_waiting">>, <<"enabled">>], Endpoint, 'true') of
+         'true' -> CCVs;
+         'false' -> kz_json:set_value(<<"Call-Waiting-Disabled">>, 'true', CCVs)
+     end
+    }.
 
 -spec get_invite_format(kz_json:object()) -> ne_binary().
 get_invite_format(SIPJObj) ->
