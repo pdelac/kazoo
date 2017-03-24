@@ -425,24 +425,20 @@ get_users(AccountDb, [OwnerId|OwnerIds], Users) ->
             get_users(AccountDb, OwnerIds, Users)
     end.
 
--spec fix_user_restrictions(kz_json:object()) -> kz_json:object().
-fix_user_restrictions(JObj) ->
-    lists:foldl(fun(Key, J) ->
-                        case kz_json:get_value([<<"call_restriction">>
-                                               ,Key
-                                               ,<<"action">>
-                                               ], J)
-                        of
-                            <<"deny">> -> J;
+-spec fix_user_restrictions(kzd_user:doc()) -> kzd_user:doc().
+fix_user_restrictions(UserJObj) ->
+    lists:foldl(fun(Classifier, User) ->
+                        case kzd_user:classifier_restriction(User, Classifier) of
+                            <<"deny">> -> User;
                             _Else ->
                                 %% this ensures we override the device
                                 %% but only when there is a user associated
-                                kz_json:set_value([<<"call_restriction">>
-                                                  ,Key
-                                                  ,<<"action">>
-                                                  ], <<"allow">>, J)
+                                kzd_user:set_classifier_restriction(User, Classifier, <<"allow">>)
                         end
-                end, JObj, kz_json:get_keys(knm_converters:available_classifiers())).
+                end
+               ,UserJObj
+               ,kz_json:get_keys(knm_converters:available_classifiers())
+               ).
 
 -spec convert_to_single_user(kzd_user:docs()) -> kzd_user:doc().
 convert_to_single_user(UserJObjs) ->
@@ -451,7 +447,7 @@ convert_to_single_user(UserJObjs) ->
                ],
     lists:foldl(fun(F, AccJObj) -> F(UserJObjs, AccJObj) end, kz_json:new(), Routines).
 
--spec singlfy_user_attr_keys(kzd_user:doc(), kzd_user:doc()) -> kz_json:object().
+-spec singlfy_user_attr_keys(kzd_user:docs(), kzd_user:doc()) -> kzd_user:doc().
 singlfy_user_attr_keys(UserJObjs, AccJObj) ->
     PrecedenceKey = [?ATTR_LOWER_KEY, ?ATTR_UPPER_KEY],
     Value = lists:foldl(fun(UserJObj, V1) ->
