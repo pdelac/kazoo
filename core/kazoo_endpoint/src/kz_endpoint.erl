@@ -405,15 +405,15 @@ get_user(AccountDb, Endpoint) ->
         [OwnerId] ->
             fix_user_restrictions(get_user(AccountDb, OwnerId));
         [_|_]=OwnerIds->
-            J = convert_to_single_user(get_users(AccountDb, OwnerIds)),
-            fix_user_restrictions(J)
+            UserJObj = convert_to_single_user(get_users(AccountDb, OwnerIds)),
+            fix_user_restrictions(UserJObj)
     end.
 
--spec get_users(ne_binary(), ne_binaries()) -> kz_json:objects().
+-spec get_users(ne_binary(), ne_binaries()) -> kzd_user:docs().
 get_users(AccountDb, OwnerIds) ->
     get_users(AccountDb, OwnerIds, []).
 
--spec get_users(ne_binary(), ne_binaries(), kz_json:objects()) -> kz_json:objects().
+-spec get_users(ne_binary(), ne_binaries(), kzd_user:docs()) -> kzd_user:docs().
 get_users(_, [], Users) ->
     Users;
 get_users(AccountDb, [OwnerId|OwnerIds], Users) ->
@@ -444,46 +444,44 @@ fix_user_restrictions(JObj) ->
                         end
                 end, JObj, kz_json:get_keys(knm_converters:available_classifiers())).
 
--spec convert_to_single_user(kz_json:objects()) -> kz_json:object().
-convert_to_single_user(JObjs) ->
+-spec convert_to_single_user(kzd_user:docs()) -> kzd_user:doc().
+convert_to_single_user(UserJObjs) ->
     Routines = [fun singlfy_user_attr_keys/2
                ,fun singlfy_user_restrictions/2
                ],
-    lists:foldl(fun(F, J) -> F(JObjs, J) end, kz_json:new(), Routines).
+    lists:foldl(fun(F, AccJObj) -> F(UserJObjs, AccJObj) end, kz_json:new(), Routines).
 
--spec singlfy_user_attr_keys(kz_json:objects(), kz_json:object()) -> kz_json:object().
-singlfy_user_attr_keys(JObjs, JObj) ->
-    Value = lists:foldl(fun(J, V1) ->
-                                case kz_json:get_integer_value([?ATTR_LOWER_KEY
-                                                               ,?ATTR_UPPER_KEY
-                                                               ], J, 5)
-                                of
+-spec singlfy_user_attr_keys(kzd_user:doc(), kzd_user:doc()) -> kz_json:object().
+singlfy_user_attr_keys(UserJObjs, AccJObj) ->
+    PrecedenceKey = [?ATTR_LOWER_KEY, ?ATTR_UPPER_KEY],
+    Value = lists:foldl(fun(UserJObj, V1) ->
+                                case kz_json:get_integer_value(PrecedenceKey, UserJObj, 5) of
                                     V2 when V2 < V1 -> V2;
                                     _ -> V1
                                 end
-                        end, 5, JObjs),
-    kz_json:set_value([?ATTR_LOWER_KEY, ?ATTR_UPPER_KEY], Value, JObj).
-
--spec singlfy_user_restrictions(kz_json:objects(), kz_json:object()) -> kz_json:object().
-singlfy_user_restrictions(JObjs, JObj) ->
-    lists:foldl(fun(Key, J) ->
-                        Fun = fun(Elem) -> do_all_restrict(Key, Elem) end,
-                        case lists:all(Fun, JObjs) of
-                            'false' -> J;
-                            'true' ->
-                                kz_json:set_value([<<"call_restriction">>
-                                                  ,Key
-                                                  ,<<"action">>
-                                                  ], <<"deny">>, J)
                         end
-                end, JObj, kz_json:get_keys(knm_converters:available_classifiers())).
+                       ,5
+                       ,UserJObjs
+                       ),
+    kz_json:set_value(PrecedenceKey, Value, AccJObj).
 
--spec do_all_restrict(ne_binary(), kz_json:object()) -> boolean().
-do_all_restrict(Key, JObj) ->
-    kz_json:get_value([<<"call_restriction">>
-                      ,Key
-                      ,<<"action">>
-                      ], JObj) =:= <<"deny">>.
+-spec singlfy_user_restrictions(kzd_user:docs(), kzd_user:doc()) -> kzd_user:doc().
+singlfy_user_restrictions(UserJObjs, AccJObj) ->
+    lists:foldl(fun(Classifier, Acc) ->
+                        Fun = fun(Elem) -> do_all_restrict(Classifier, Elem) end,
+                        case lists:all(Fun, UserJObjs) of
+                            'false' -> Acc;
+                            'true' ->
+                                kzd_user:set_classifier_restriction(Acc, Classifier, <<"deny">>)
+                        end
+                end
+               ,AccJObj
+               ,kz_json:get_keys(knm_converters:available_classifiers())
+               ).
+
+-spec do_all_restrict(ne_binary(), kzd_user:doc()) -> boolean().
+do_all_restrict(Classifier, UserJObj) ->
+    <<"deny">> =:= kzd_user:classifier_restriction(UserJObj, Classifier).
 
 -spec create_endpoint_name(api_binary(), api_binary(), api_binary(), api_binary()) -> api_binary().
 create_endpoint_name('undefined', 'undefined', 'undefined', Account) -> Account;
